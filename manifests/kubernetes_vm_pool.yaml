@@ -1,0 +1,76 @@
+apiVersion: pool.kubevirt.io/v1alpha1
+kind: VirtualMachinePool
+metadata:
+  name: k8s
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      kubevirt.io/vmpool: k8s
+  virtualMachineTemplate:
+    metadata:
+      creationTimestamp: null
+      labels:
+        kubevirt.io/vmpool: k8s
+    spec:
+      runStrategy: Always
+      template:
+        metadata:
+          creationTimestamp: null
+          labels:
+            kubevirt.io/vmpool: k8s
+        spec:
+          domain:
+            cpu:
+              cores: 3
+            devices:
+              disks:
+                - name: disk0
+                  disk:
+                    bus: virtio
+                - name: cloudinitdisk
+                  cdrom:
+                    bus: sata
+                    readonly: true
+            machine:
+              type: q35
+            resources:
+              requests:
+                memory: 4096M
+          terminationGracePeriodSeconds: 0
+          volumes:
+            - name: disk0
+              dataVolume:
+                name: ubuntu
+            - name: cloudinitdisk
+              cloudInitNoCloud:
+                userData: |
+                  #cloud-config
+                  disable_root: false
+                  ssh_pwauth: true
+                  chpasswd:
+                    list: |
+                      root:onejobplease
+                    expire: false
+                  write_files:
+                    - path: /etc/ssh/sshd_config
+                      content: |
+                        PermitRootLogin yes
+                        PasswordAuthentication yes
+                      append: true
+
+                  runcmd:
+                    - systemctl restart ssh      
+      dataVolumeTemplates:
+      - metadata:
+          name: ubuntu
+        spec:
+          pvc:
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: 10Gi
+          source:
+            http:
+              url: "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"

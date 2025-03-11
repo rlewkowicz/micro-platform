@@ -1,0 +1,4 @@
+Host vmi/*
+   ProxyCommand virtctl port-forward --stdio=true %h %p
+Host vm/*
+   ProxyCommand virtctl port-forward --stdio=true %h %p

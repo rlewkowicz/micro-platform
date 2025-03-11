@@ -1,0 +1,3 @@
+plugin: kubevirt.core.kubevirt
+namespaces:
+  - default

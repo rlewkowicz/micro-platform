@@ -1,0 +1,89 @@
+version: '3.8'
+
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    environment:
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_PORT: 7080
+      KC_HOSTNAME_STRICT_BACKCHANNEL: "true"
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_HEALTH_ENABLED: "true"
+      KC_LOG_LEVEL: info
+    ports:
+      - "7080:7080"
+      - "7443:7443"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7080/health/ready"]
+      interval: 15s
+      timeout: 2s
+      retries: 15
+    command: ["start-dev"]
+
+  ceph-nano:
+    build:
+      context: .  
+      dockerfile: Dockerfile
+    container_name: ceph-nano
+    privileged: true
+    networks:
+      - ceph-net
+    volumes:
+      - //var/run/docker.sock:/var/run/docker.sock
+    entrypoint:
+      - /bin/sh
+      - '-c'
+      - |
+        /bin/sh << 'HERE'
+        docker rm -f ceph-nano-images
+        cn cluster start images -f huge -d /tmp &
+        until docker exec ceph-nano-images ceph config set mgr mgr/dashboard/ssl false; do sleep .2; done
+        docker network connect docker_ceph-net ceph-nano-images        
+        docker exec ceph-nano-images ceph config set mgr mgr/dashboard/server_addr 0.0.0.0
+        docker exec ceph-nano-images ceph config set mgr mgr/dashboard/server_port 8080
+        docker exec ceph-nano-images ceph mgr module enable dashboard
+        until docker exec ceph-nano-images sh -c 'ceph dashboard set-login-credentials nano -i $(echo nano > file; echo file)'; do docker start ceph-nano-images; sleep .2; done  
+        eval "$(docker exec ceph-nano-images radosgw-admin user create --uid=rgw --display-name=rgw --system | \
+        awk -F': ' '
+            /"access_key"/ {gsub(/[",]/, "", $2); print "docker exec ceph-nano-images sh -c \"echo \"" $2 "\" > file1\""}
+            /"secret_key"/ {gsub(/[",]/, "", $2); print "docker exec ceph-nano-images sh -c \"echo \"" $2 "\" > file2\""}
+        ')"
+        docker exec ceph-nano-images sh -c "ceph dashboard set-rgw-api-access-key -i file1"
+        docker exec ceph-nano-images sh -c "ceph dashboard set-rgw-api-secret-key -i file2"
+        docker exec ceph-nano-images ceph dashboard set-rgw-api-host 127.0.0.1
+        docker exec ceph-nano-images ceph dashboard set-rgw-api-port 8000
+        docker exec ceph-nano-images ceph dashboard set-rgw-api-scheme http
+        docker exec ceph-nano-images ceph dashboard set-rgw-api-user-id rgw
+
+        tail -f /dev/null
+        HERE
+    restart: always
+
+  ceph-proxy:
+    image: nginx:alpine
+    container_name: ceph-proxy
+    networks:
+      - ceph-net
+    ports:
+      - "8082:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - ceph-nano
+    entrypoint:
+      - /bin/sh
+      - '-c'
+      - |
+        until nc -z "$(ping -c1 ceph-nano-images | grep -Eo '((25[0-5]|(2[0-4]|1[0-9]|[1-9]|)\d)\.?\b){4}' | head -1 | grep .)" 8080 2>/dev/null; do
+          echo "Port 8080 is not yet available, retrying in 5 seconds..."
+          sleep 5
+        done
+
+        echo "ceph-nano-images is available! Starting Nginx..."
+        nginx -g 'daemon off;'
+    restart: always
+
+networks:
+  ceph-net:
+    driver: bridge
