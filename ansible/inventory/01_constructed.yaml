@@ -9,6 +9,5 @@ groups:
 compose:
   ansible_user: "'root'"
   ansible_password: "'onejobplease'"
-
   ansible_host: >-
     "vm/" + inventory_hostname.replace('default-', '')

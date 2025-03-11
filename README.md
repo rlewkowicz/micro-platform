@@ -129,6 +129,10 @@ docker run --rm -it -d --name ansible --net=host \
 quay.io/kubespray/kubespray:v2.27.0 tail -f /dev/null
 
 docker exec -ti ansible sh -c "pip install kubernetes && ansible-galaxy collection install kubevirt.core"
-
 docker exec -ti ansible ansible-playbook -i /inventory cluster.yml -b -v
+docker exec -ti ansible ansible -i /inventory all -m fetch -a "src=/etc/kubernetes/admin.conf dest=/inventory/ flat=yes" > /dev/null
+sudo chown $USER ansible/inventory/admin.conf
+IP=$(docker exec -ti ansible ansible -i /inventory all -m shell -a "ip -4 addr show enp1s0 | grep inet | awk '{print \$2}' | cut -d/ -f1" | tail -n 1 | sed 's/\x1B\[[0-9;]*[mK]//g' | grep -oP '\S*')
+sed -i "s#server: https://127.0.0.1:6443#server: https://$IP:6443#g" ansible/inventory/admin.conf
 ```
+
