@@ -6,6 +6,7 @@ As simple as I've made this look, this will actually give you a fairly enterpris
 You can't ask ChatGPT how to make a nested enterprise k8s architecture lol. I don't think you'll find such a terse quick start covering so many bases anywhere else. I'm almost worried it makes it look trivial. This is phenomenally terse. It's an entire micro platform on one page. This is my skillset, an ability to condense worlds of information into one page. To navigate a decade of noise and put it all right in front of you.
 
 ### Base OS
+
 Ubuntu 22.04.4 LTS x64 on bare metal with processor virtualization enabled (You can probably use 20.04/24.04 but ymmv)
 
 ### Docker 
@@ -105,6 +106,14 @@ kubectl logs -f importer-ubuntu | stdbuf -o0 grep -m 1 "Import Complete"
 ### Launch the Kubernetes VM Pool
 ```
 kubectl apply -f manifests/kubernetes_vm_pool.yaml
+
+(exit 1)
+while [ $? != 0 ]; do
+printf "\nWaiting for VMs to be ready...\n"
+sleep 3
+kubectl get vms | grep True | wc -l | grep 3 > /dev/null
+done
+echo
 ```
 
 ## Halftime
@@ -134,5 +143,64 @@ docker exec -ti ansible ansible -i /inventory all -m fetch -a "src=/etc/kubernet
 sudo chown $USER ansible/inventory/admin.conf
 IP=$(docker exec -ti ansible ansible -i /inventory all -m shell -a "ip -4 addr show enp1s0 | grep inet | awk '{print \$2}' | cut -d/ -f1" | tail -n 1 | sed 's/\x1B\[[0-9;]*[mK]//g' | grep -oP '\S*')
 sed -i "s#server: https://127.0.0.1:6443#server: https://$IP:6443#g" ansible/inventory/admin.conf
+export KUBECONFIG=$(pwd)/ansible/inventory/admin.conf
 ```
 
+## Docker Services - Ceph & KeyCloak
+```
+pushd Docker && docker-compose up -d --force-recreate --remove-orphans && popd 
+```
+
+### NOTE: This section is not done. The routing to the mons is problematic. The docker services work as does the cluster at this point
+## Ceph Storage
+```
+sed \
+-e "s/##HOSTNAME##/$(hostname)/g" \
+-e "s/##USERKEY##/$(docker exec -ti ceph-nano-images ceph auth get-key client.admin | tr -d '\n' | base64)/g" \
+-e "s/##FSID##/$(docker exec -ti ceph-nano-images ceph mon dump | grep fsid | awk '{print $2}' | grep -Po "\S*")/g" \
+manifests/ceph-rbd.yaml | kubectl apply -f -
+
+(exit 1)
+while [ $? != 0 ]; do
+printf "\nWaiting for traefik to be ready...\n"
+sleep 3
+docker exec ceph-nano-images \ls | grep traefik > /dev/null
+done
+echo
+
+# I want everyone to know how clever and and painful this was. That is all.
+docker exec ceph-nano-images sh -c '
+cat <<'"'"'EOF'"'"' > traefik.toml
+[entryPoints]
+  [entryPoints.tcp3301]
+    address = ":3301"
+  [entryPoints.tcp6790]
+    address = ":6790"
+
+[providers]
+  file = { filename = "dynamic.toml" }
+EOF
+
+cat <<'"'"'EOF'"'"' > dynamic.toml
+[tcp.routers]
+  [tcp.routers.router3301]
+    entryPoints = ["tcp3301"]
+    rule = "HostSNI(`*`)"
+    service = "service3300"
+  [tcp.routers.router6790]
+    entryPoints = ["tcp6790"]
+    rule = "HostSNI(`*`)"
+    service = "service6789"
+
+[tcp.services]
+  [tcp.services.service3300.loadBalancer]
+    [[tcp.services.service3300.loadBalancer.servers]]
+      address = "127.0.0.1:3300"
+  [tcp.services.service6789.loadBalancer]
+    [[tcp.services.service6789.loadBalancer.servers]]
+      address = "127.0.0.1:6789"
+EOF
+
+nohup ./traefik --configFile=traefik.toml &
+'
+```

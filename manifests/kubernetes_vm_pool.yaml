@@ -70,7 +70,7 @@ spec:
               - ReadWriteOnce
             resources:
               requests:
-                storage: 10Gi
+                storage: 30Gi
           source:
             http:
               url: "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"

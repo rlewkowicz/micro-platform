@@ -2,24 +2,14 @@ version: '3.8'
 
 services:
   keycloak:
-    image: quay.io/keycloak/keycloak:24.0
+    image: quay.io/keycloak/keycloak:26.1.4
+    container_name: keycloak
     environment:
-      KC_HOSTNAME: localhost
-      KC_HOSTNAME_PORT: 7080
-      KC_HOSTNAME_STRICT_BACKCHANNEL: "true"
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin
-      KC_HEALTH_ENABLED: "true"
-      KC_LOG_LEVEL: info
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
     ports:
-      - "7080:7080"
-      - "7443:7443"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:7080/health/ready"]
-      interval: 15s
-      timeout: 2s
-      retries: 15
-    command: ["start-dev"]
+      - "8080:8080"
+    command: start-dev
 
   ceph-nano:
     build:
@@ -51,11 +41,13 @@ services:
         ')"
         docker exec ceph-nano-images sh -c "ceph dashboard set-rgw-api-access-key -i file1"
         docker exec ceph-nano-images sh -c "ceph dashboard set-rgw-api-secret-key -i file2"
-        docker exec ceph-nano-images ceph dashboard set-rgw-api-host 127.0.0.1
+        docker exec ceph-nano-images ceph dashboard set-rgw-api-host 0.0.0.0
         docker exec ceph-nano-images ceph dashboard set-rgw-api-port 8000
         docker exec ceph-nano-images ceph dashboard set-rgw-api-scheme http
         docker exec ceph-nano-images ceph dashboard set-rgw-api-user-id rgw
-
+        docker exec ceph-nano-images ceph osd pool create ceph-csi-pool
+        docker exec ceph-nano-images rbd pool init ceph-csi-pool
+        docker exec ceph-nano-images sh -c 'curl -L https://github.com/traefik/traefik/releases/download/v3.3.4/traefik_v3.3.4_linux_amd64.tar.gz | tar xz && chmod 700 traefik'
         tail -f /dev/null
         HERE
     restart: always
@@ -67,6 +59,9 @@ services:
       - ceph-net
     ports:
       - "8082:80"
+      - "8081:81"
+      - "6789:6789"
+      - "3300:3300"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
